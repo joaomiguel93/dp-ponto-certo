@@ -1,5 +1,5 @@
- ponto para escritórios de contabilidade e profissionais de Departamento Pessoal.
-
+⏱ PontoCerto DP
+Plataforma gratuita de apuração de cartão ponto para escritórios de contabilidade e profissionais de Departamento Pessoal.
 Desenvolvido com auxílio de inteligência artificial (Claude/Anthropic) · © 2026 João Miguel E Ferreira
 
 
