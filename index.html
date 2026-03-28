@@ -266,7 +266,7 @@ body {
 /* =====================================================
    TABELA DE PONTO
    ===================================================== */
-.tbl-wrap { overflow-x: auto; border-radius: var(--radius); border: 1px solid var(--border); }
+.tbl-wrap { overflow-x: auto; overflow-y: auto; max-height: calc(100vh - 260px); border-radius: var(--radius); border: 1px solid var(--border); }
 table { width: 100%; border-collapse: collapse; font-size: 12px; }
 thead th {
   background: var(--surface2); padding: 7px 6px;
@@ -296,8 +296,9 @@ tbody td select.sel-oc {
   border-radius: 3px; color: var(--text2); cursor: pointer; font-family: inherit;
 }
 
-/* Linha de totais */
+/* Linha de totais — fixa no rodapé da tabela */
 tfoot tr td {
+  position: sticky; bottom: 0; z-index: 4;
   background: var(--surface2) !important;
   font-weight: 700; border-top: 2px solid var(--border2);
   font-family: 'DM Mono', monospace; font-size: 11.5px; color: var(--accent);
@@ -498,7 +499,7 @@ tfoot tr td:first-child {
   .card        { page-break-inside: avoid; border: 1px solid #ddd !important; background: #fff !important; }
   .view.active { display: block !important; }
 
-  @page { size: A4 portrait; margin: 10mm 8mm; }
+  @page { size: A4 landscape; margin: 10mm 8mm; }
 }
 
 /* =====================================================
@@ -697,7 +698,7 @@ body.light       #tblCargaResumo tr.ch-destaque td:last-child { color: var(--yel
                 <label>Trab. Sáb?</label>
                 <select id="cfgSabado" onchange="toggleSabCfg()">
                   <option value="0">Não</option>
-                  <option value="1">Sim — HE 100%</option>
+                  <option value="1">Sim</option>
                 </select>
               </div>
               <div class="fg" id="grpSabE" style="display:none;width:95px;flex:none"><label>Ent. Sáb</label><input type="time" id="cfgSabEntrada" value="08:00"></div>
@@ -1189,7 +1190,7 @@ function renderCargaHoraria() {
   const si  = document.getElementById('cfgSaidaInt').value;
   const ri  = document.getElementById('cfgRetInt').value;
   const s   = document.getElementById('cfgSaida').value;
-  const sabEn  = document.getElementById('cfgSabado').value === '1';
+  const sabEn  = parseInt(document.getElementById('cfgSabado').value) >= 1;
   const sabE   = document.getElementById('cfgSabEntrada').value;
   const sabS   = document.getElementById('cfgSabSaida').value;
 
@@ -1268,9 +1269,9 @@ function showView(name) {
 
 /** Mostrar/ocultar campos de horário do sábado */
 function toggleSabCfg() {
-  const v = document.getElementById('cfgSabado').value;
-  document.getElementById('grpSabE').style.display = v === '1' ? '' : 'none';
-  document.getElementById('grpSabS').style.display = v === '1' ? '' : 'none';
+  const v = parseInt(document.getElementById('cfgSabado').value);
+  document.getElementById('grpSabE').style.display = v >= 1 ? '' : 'none';
+  document.getElementById('grpSabS').style.display = v >= 1 ? '' : 'none';
 }
 
 /** Mostrar/ocultar campos de HE personalizada */
@@ -1414,26 +1415,23 @@ function calcIntrajornada(row) {
 // =====================================================
 
 /**
- * Calcula as horas extras com suporte a faixas percentuais personalizadas.
- * Modo padrão: 50% dias úteis / 100% domingos e feriados
- * Modo custom: 1ª faixa com % A até X horas, restante com % B
- *              sábado (se cfgSabado=1) sempre 100%
+ * Calcula as horas extras.
+ * Modo clássico: 50% dias úteis (incl. sábado) / 100% domingos e feriados trabalhados
+ * Sábado "Não": tratado como dia normal (HE 50% ou custom)
+ * Sábado "Sim": tem jornada configurada; excedente = HE 50% ou custom
  * @returns { heA: min, heB: min, pctA: %, pctB: % }
  */
-function calcHE(heExtraMin, isDom, isSab) {
+function calcHE(heExtraMin, isDom, isFer) {
   const custom = document.getElementById('cfgHECustom').value === '1';
-  const sabEnable = document.getElementById('cfgSabado').value === '1';
 
   if (!custom) {
-    // Modo clássico
-    if (isDom || (isSab && sabEnable)) return { heA: 0, heB: heExtraMin, pctA: 50, pctB: 100 };
+    // Modo clássico: dom/feriado = 100%, resto = 50%
+    if (isDom || isFer) return { heA: 0, heB: heExtraMin, pctA: 50, pctB: 100 };
     return { heA: heExtraMin, heB: 0, pctA: 50, pctB: 0 };
   }
 
-  // Sábado com custom → sempre 100%
-  if (isSab && sabEnable) return { heA: heExtraMin, heB: 0, pctA: 100, pctB: 0 };
-  // Domingo com custom → sempre 100%
-  if (isDom) return { heA: heExtraMin, heB: 0, pctA: 100, pctB: 0 };
+  // Modo custom: dom/feriado sempre 100%
+  if (isDom || isFer) return { heA: heExtraMin, heB: 0, pctA: 100, pctB: 0 };
 
   const faixaMin = Math.round(parseFloat(document.getElementById('cfgHEFaixa').value || 2) * 60);
   const pctA     = parseFloat(document.getElementById('cfgHEP1').value || 65);
@@ -1487,15 +1485,22 @@ function calcDia(row, isDom, isSab, isFer) {
   // Jornada padrão = manhã + tarde (descontando o intervalo configurado)
   const jornadaRef = diffMin(cfgE, cfgSI) + diffMin(cfgRI, cfgS);
 
-  // Para sábado, usa horário específico do sábado
-  const sabEnable = document.getElementById('cfgSabado').value === '1';
+  // Jornada por tipo de dia
+  const sabMode = parseInt(document.getElementById('cfgSabado').value); // 0=Não, 1=Sim
+  const sabEnable = sabMode >= 1;
   let jornadaDia = jornadaRef;
   if (isDom) {
-    jornadaDia = 0; // domingo: jornada de referência zero — todo minuto trabalhado é HE 100%
-  } else if (isSab && sabEnable) {
-    const sE = t2m(document.getElementById('cfgSabEntrada').value);
-    const sS = t2m(document.getElementById('cfgSabSaida').value);
-    jornadaDia = diffMin(sE, sS);
+    jornadaDia = 0; // domingo: todo tempo trabalhado = HE 100%
+  } else if (isSab) {
+    if (sabEnable) {
+      // Sábado "Sim": tem jornada configurada
+      const sE = t2m(document.getElementById('cfgSabEntrada').value);
+      const sS = t2m(document.getElementById('cfgSabSaida').value);
+      jornadaDia = diffMin(sE, sS);
+    } else {
+      // Sábado "Não": sem jornada, todo tempo trabalhado = HE (percentual padrão)
+      jornadaDia = 0;
+    }
   }
 
   // --- OCORRÊNCIAS ESPECIAIS ---
@@ -1555,10 +1560,14 @@ function calcDia(row, isDom, isSab, isFer) {
   }
 
   // --- HORAS EXTRAS ---
+  // Feriado trabalhado (sem ocorrência "feriado"): todo tempo = HE 100%
   const heExtra = trabalhado - jornadaDia;
   let heA = 0, heB = 0, pctA = 50, pctB = 0;
-  if (heExtra > 0) {
-    const r = calcHE(heExtra, isDom, isSab);
+  if (isFer && trabalhado > 0) {
+    const r = calcHE(trabalhado, false, true);
+    heA = r.heA; heB = r.heB; pctA = r.pctA; pctB = r.pctB;
+  } else if (heExtra > 0) {
+    const r = calcHE(heExtra, isDom, false);
     heA = r.heA; heB = r.heB; pctA = r.pctA; pctB = r.pctB;
   }
 
@@ -1660,7 +1669,7 @@ function gerarTabela() {
     const isSab  = diaSem === 6;
     const ferObj = isFeriado(ano, mes, d);
     const isFer  = !!ferObj;
-    const sabEn  = document.getElementById('cfgSabado').value === '1';
+    const sabEn  = parseInt(document.getElementById('cfgSabado').value) >= 1;
 
     // FDS: fim de semana normal (desativado se sábado habilitado)
     const eFDS = isDom || (isSab && !sabEn);
@@ -1697,8 +1706,8 @@ function gerarTabela() {
       {v:'',l:'—'},{v:'falta',l:'Falta'},{v:'atestado',l:'Atestado'},{v:'feriado',l:'Feriado'}
     ].map(o=>`<option value="${o.v}"${saved.ocorrencia===o.v?' selected':''}>${o.l}</option>`).join('');
 
-    // Badge feriado (sem DOM/SAB na label — evita duplicação e economiza espaço)
-    const badge = isFer ? `<span class="badge b-fer" title="${ferObj.desc}">FER</span>` : '';
+    // Badge feriado: só mostra se não tiver ocorrência já marcada como feriado
+    const badge = (isFer && saved.ocorrencia !== 'feriado') ? `<span class="badge b-fer" title="${ferObj.desc}">FER</span>` : '';
 
     tr.innerHTML = `
       <td><span class="day-lbl">${String(d).padStart(2,'0')}/${String(mes).padStart(2,'0')}</span>
@@ -1778,6 +1787,10 @@ function renderLinha(d, chave, tr) {
   const ocPrint = tr.querySelector('.oc-print');
   if (ocPrint) ocPrint.textContent = row.ocorrencia || '';
 
+  // Atualiza badge FER: ocultar quando ocorrência = feriado
+  const ferBadge = tr.querySelector('.badge.b-fer');
+  if (ferBadge) ferBadge.style.display = (row.ocorrencia === 'feriado') ? 'none' : '';
+
   // Trabalhado
   trabEl.textContent = r.trabalhado ? m2s(r.trabalhado) : '—';
   trabEl.className   = 'cc' + (r.status==='falta'?' neg' : r.trabalhado>0?' pos':'');
@@ -1828,7 +1841,7 @@ function renderLinha(d, chave, tr) {
 function atualizarTotais(chave) {
   const [mes, ano] = chave.split('_').map(Number);
   const diasNoMes  = new Date(ano, mes, 0).getDate();
-  const sabEn      = document.getElementById('cfgSabado').value === '1';
+  const sabEn      = parseInt(document.getElementById('cfgSabado').value) >= 1;
   let totTrab=0, totAtr=0, totHEA=0, totHEB=0, totNot=0;
 
   for (let d = 1; d <= diasNoMes; d++) {
@@ -1854,7 +1867,7 @@ function preencherPadrao() {
   const mes  = parseInt(document.getElementById('selMes').value);
   const ano  = parseInt(document.getElementById('selAno').value);
   const chave = `${mes}_${ano}`;
-  const sabEn = document.getElementById('cfgSabado').value === '1';
+  const sabEn = parseInt(document.getElementById('cfgSabado').value) >= 1;
   const nDias = new Date(ano, mes, 0).getDate();
 
   for (let d = 1; d <= nDias; d++) {
@@ -1899,7 +1912,7 @@ function limparTabela() {
 // TOTAIS PARA RESUMO E EXPORTAÇÃO
 // =====================================================
 function calcTotais(chave, mes, ano) {
-  const sabEn   = document.getElementById('cfgSabado').value === '1';
+  const sabEn   = parseInt(document.getElementById('cfgSabado').value) >= 1;
   const nDias   = new Date(ano, mes, 0).getDate();
   let tT=0, tA=0, tHA=0, tHB=0, tN=0, tF=0, tAt=0, tDU=0, tIntraViol=0;
   const datasFaltas=[], datasAtestados=[];
@@ -2004,7 +2017,7 @@ function exportCSV() {
   const DFULL = ['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];
   const nF    = document.getElementById('nomeFuncionario').value.trim() || 'Funcionario';
   const nE    = document.getElementById('nomeEmpresa').value.trim() || '';
-  const sabEn = document.getElementById('cfgSabado').value === '1';
+  const sabEn = parseInt(document.getElementById('cfgSabado').value) >= 1;
 
   let csv = `Cartão Ponto — ${nF} — ${MESES[mes-1]}/${ano}\n`;
   if (nE) csv += `Empresa: ${nE}\n`;
